@@ -1,6 +1,6 @@
 import type { EmailPayload, ApiResponse, PushPayload, Delegate } from "./types"; // Assuming these types are declared in a separate file
 
-const API_BASE_URL = "https://shafdb.cognitron.co.ke/shaf/api";
+const API_BASE_URL = "https://events.shelterafrique.org/shaf/api";
 const AUTH_TOKEN =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2ODRhN2E3ZDc4MjJkNDNjODhhMmQ4YmYiLCJlbWFpbCI6ImphbmUud2FuamlrdUBjb21wYW55LmNvbSIsInJvbGVzIjpbImVtcGxveWVlIl0sImlhdCI6MTc1MTg3NDEwMywiZXhwIjoxNzgzNDEwMTAzfQ.W5J2odzgV26AjViHTk1fiW-mHA8-oJfxp4evQRW89CA";
 
