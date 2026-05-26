@@ -63,9 +63,14 @@ export function PremiumBadge({
   // Format Letter-Spaced Category
   const spacedCategory = categoryText.split("").join(" ");
 
-  // Dynamic QR Code API (high speed, secure)
+  // Dynamic QR Code API encoding structured delegate JSON properties
+  const qrDataObj = {
+    delegateId: delegate._id,
+    name: `${delegate.firstName} ${delegate.lastName}`,
+    eventYear: delegate.eventYear || 2026,
+  };
   const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(
-    delegate._id
+    JSON.stringify(qrDataObj)
   )}`;
 
   return (
@@ -100,30 +105,13 @@ export function PremiumBadge({
 
       {/* 2. Middle Event Details Section */}
       <div className="flex items-start px-6 gap-3 pt-1">
-        {/* Left: Beautiful CSS Stylized 45 AGM Brand Graphic */}
-        <div className="flex flex-col items-center flex-shrink-0">
-          <div className="relative w-16 h-16 flex items-center justify-center">
-            {/* Geometric representation of 45 mark */}
-            <div className="absolute inset-0 flex items-center justify-center">
-              <svg viewBox="0 0 100 100" className="w-14 h-14">
-                {/* 4 */}
-                <path d="M15 15 V50 H45 V65 H55 V50 H65 V40 H55 V15 H45 V40 H27 V15 H15 Z" fill="#B71C1C" />
-                {/* 5 */}
-                <path d="M48 20 H75 V30 H58 V42 C60 40 68 40 72 44 C76 48 76 56 72 60 C68 64 58 64 54 60 C51 57 51 53 51 53 H41 C41 55 42 62 48 68 C54 74 68 74 76 68 C84 62 84 48 76 40 C72 36 64 36 60 38 V30 H48 V20 Z" fill="#B71C1C" />
-                {/* Waving Green Ribbon */}
-                <path d="M72 32 C82 45 88 65 88 88 C88 105 78 120 68 120 V105 C72 105 78 95 78 88 C78 72 70 54 62 44 Z" fill="#1B5E20" />
-              </svg>
-            </div>
-          </div>
-          {/* Hexagonal Rosettes */}
-          <div className="flex gap-0.5 mt-1">
-            {[1, 2, 3].map((i) => (
-              <svg key={i} viewBox="0 0 100 100" className="w-3.5 h-3.5 fill-[#1B5E20]">
-                <polygon points="50,5 95,25 95,75 50,95 5,75 5,25" />
-                <circle cx="50" cy="50" r="22" fill="#fff" />
-              </svg>
-            ))}
-          </div>
+        {/* Left: 45th AGM Brand Graphic Logo */}
+        <div className="flex-shrink-0 flex items-center justify-center pl-2">
+          <img
+            src="/agm-45-logo.png"
+            alt="45th AGM Logo"
+            className="w-[70px] h-[90px] object-contain"
+          />
         </div>
 
         {/* Right: Bilingual Title Text */}

@@ -30,6 +30,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Search,
   Filter,
   Users,
@@ -56,6 +64,7 @@ import {
   Printer,
   Loader2,
   Award,
+  MoreHorizontal,
 } from "lucide-react";
 import type { Delegate } from "@/types/delegate";
 import {
@@ -307,6 +316,21 @@ export function DelegateManagement({
   const handleOpenDeleteDialog = (delegate: Delegate) => {
     setSelectedDelegate(delegate);
     setDeleteDialogOpen(true);
+  };
+
+  const handleOpenSingleBadgeModal = (delegate: Delegate) => {
+    setAllYearDelegates([delegate]);
+    setBadgeScope("all");
+    setBadgeCategoryOverride("auto");
+    setBadgeLanguage("bilingual");
+    
+    // Reset filters
+    setModalSearch("");
+    setModalTypeFilter("all");
+    setModalStatusFilter("all");
+    setModalModeFilter("all");
+    
+    setBadgeModalOpen(true);
   };
 
   const handleOpenBadgeModal = async (scope: "selected" | "all") => {
@@ -632,7 +656,7 @@ export function DelegateManagement({
                   <TableHead>Type</TableHead>
                   <TableHead>Mode</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Check-in</TableHead>
+                  {/* <TableHead>Check-in</TableHead> */}
                   <TableHead className="w-24 text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -693,7 +717,7 @@ export function DelegateManagement({
                         {delegate.status}
                       </Badge>
                     </TableCell>
-                    <TableCell>
+                    {/* <TableCell>
                       <div className="flex items-center space-x-1 text-sm font-medium">
                         {delegate.hasCheckedIn ? (
                           <Badge className="bg-green-600 text-white border-0 font-semibold">Yes</Badge>
@@ -701,37 +725,63 @@ export function DelegateManagement({
                           <Badge variant="outline" className="border-border text-muted-foreground">No</Badge>
                         )}
                       </div>
-                    </TableCell>
+                    </TableCell> */}
                     <TableCell className="text-right">
-                      <div className="flex items-center justify-end space-x-1">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-8 w-8 p-0 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50/50"
-                          onClick={() => {
-                            setBadgeTargets([delegate]);
-                            setBadgeCategoryOverride("auto");
-                            setBadgeLanguage("bilingual");
-                            setBadgeModalOpen(true);
-                          }}
-                          title="Preview & Generate Badge"
-                        >
-                          <Award className="h-4.5 w-4.5" />
-                        </Button>
-                        <Link href={`/delegates/${delegate._id}`}>
-                          <Button size="sm" variant="ghost" className="h-8 w-8 p-0">
-                            <Eye className="h-4 w-4 text-muted-foreground hover:text-foreground" />
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            className="h-8 w-8 p-0 hover:bg-muted focus-visible:ring-indigo-500 rounded-md"
+                          >
+                            <span className="sr-only">Open actions menu</span>
+                            <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
                           </Button>
-                        </Link>
-                        <Link href={`/delegates/${delegate._id}/edit`}>
-                          <Button size="sm" variant="ghost" className="h-8 w-8 p-0">
-                            <Edit2 className="h-4 w-4 text-muted-foreground hover:text-indigo-600" />
-                          </Button>
-                        </Link>
-                        <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => handleOpenDeleteDialog(delegate)}>
-                          <Trash2 className="h-4 w-4 text-muted-foreground hover:text-red-600" />
-                        </Button>
-                      </div>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-40 border bg-card shadow-lg font-medium text-xs animate-in fade-in-50 slide-in-from-top-1 duration-150">
+                          <DropdownMenuLabel className="text-[10px] uppercase font-bold text-muted-foreground px-2 py-1.5">
+                            Actions
+                          </DropdownMenuLabel>
+                          <DropdownMenuSeparator className="bg-border" />
+                          
+                          <DropdownMenuItem
+                            onClick={() => handleOpenSingleBadgeModal(delegate)}
+                            className="flex items-center gap-2 cursor-pointer py-2 px-2 hover:bg-accent hover:text-indigo-600 focus:text-indigo-600 rounded-sm font-semibold"
+                          >
+                            <Award className="h-4 w-4 text-indigo-500 animate-pulse" />
+                            <span>Event Badge</span>
+                          </DropdownMenuItem>
+
+                          <DropdownMenuItem asChild>
+                            <Link
+                              href={`/delegates/${delegate._id}`}
+                              className="flex items-center gap-2 cursor-pointer py-2 px-2 hover:bg-accent hover:text-foreground focus:text-foreground rounded-sm font-semibold"
+                            >
+                              <Eye className="h-4 w-4 text-slate-500" />
+                              <span>View Profile</span>
+                            </Link>
+                          </DropdownMenuItem>
+
+                          <DropdownMenuItem asChild>
+                            <Link
+                              href={`/delegates/${delegate._id}/edit`}
+                              className="flex items-center gap-2 cursor-pointer py-2 px-2 hover:bg-accent hover:text-indigo-600 focus:text-indigo-600 rounded-sm font-semibold"
+                            >
+                              <Edit2 className="h-4 w-4 text-blue-500" />
+                              <span>Edit Profile</span>
+                            </Link>
+                          </DropdownMenuItem>
+
+                          <DropdownMenuSeparator className="bg-border" />
+                          
+                          <DropdownMenuItem
+                            onClick={() => handleOpenDeleteDialog(delegate)}
+                            className="flex items-center gap-2 cursor-pointer py-2 px-2 hover:bg-red-50 text-red-600 hover:text-red-700 focus:text-red-700 focus:bg-red-50 rounded-sm font-semibold"
+                          >
+                            <Trash2 className="h-4 w-4 text-red-500" />
+                            <span>Revoke Access</span>
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 ))}
