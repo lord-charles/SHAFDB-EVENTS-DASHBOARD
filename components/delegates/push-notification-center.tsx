@@ -1,3 +1,5 @@
+"use client";
+
 import { useState } from "react";
 import {
   Card,
@@ -36,7 +38,7 @@ import {
 } from "lucide-react";
 import type { Delegate } from "@/types/delegate";
 import type { PushPayload } from "@/types/api";
-import { apiService } from "@/services/api";
+import { sendPushToAll, sendPushToDelegate } from "@/services/delegates.service";
 
 interface PushNotificationCenterProps {
   selectedDelegates: Delegate[];
@@ -98,7 +100,7 @@ export function PushNotificationCenter({
       if (selectedDelegates.length === 0) {
         // Send to all delegates
         setSendProgress(50);
-        const response = await apiService.sendPushToAll(pushPayload);
+        const response = await sendPushToAll(pushPayload);
         setSendProgress(100);
 
         setSendResult({
@@ -114,7 +116,7 @@ export function PushNotificationCenter({
 
         for (const delegate of selectedDelegates) {
           try {
-            await apiService.sendPushToDelegate(delegate._id, pushPayload);
+            await sendPushToDelegate(delegate._id, pushPayload);
             completed++;
           } catch (error) {
             console.error(`Failed to send push to ${delegate.email}:`, error);

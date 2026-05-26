@@ -62,7 +62,7 @@ const handler = NextAuth({
               employeeId: data.user.employeeId,
               department: data.user.department,
               position: data.user.position,
-              token: data.user.accessToken,
+              token: data.token,
             };
           }
 

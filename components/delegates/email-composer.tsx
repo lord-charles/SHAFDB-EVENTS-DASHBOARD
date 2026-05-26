@@ -40,7 +40,7 @@ import {
 import type { Delegate } from "@/types/delegate";
 import type { EmailTemplate, EmailPayload } from "@/types/api";
 import { templateService } from "@/services/templateService";
-import { apiService } from "@/services/api";
+import { sendEmailToAll, sendEmailToDelegate } from "@/services/delegates.service";
 
 interface EmailComposerProps {
   selectedDelegates: Delegate[];
@@ -225,7 +225,7 @@ export function EmailComposer({ selectedDelegates }: EmailComposerProps) {
       if (selectedDelegates.length === 0) {
         // Send to all delegates
         setSendProgress(50);
-        const response = await apiService.sendEmailToAll(emailPayload);
+        const response = await sendEmailToAll(emailPayload);
         setSendProgress(100);
 
         setSendResult({
@@ -241,7 +241,7 @@ export function EmailComposer({ selectedDelegates }: EmailComposerProps) {
 
         for (const delegate of selectedDelegates) {
           try {
-            await apiService.sendEmailToDelegate(delegate._id, emailPayload);
+            await sendEmailToDelegate(delegate._id, emailPayload);
             completed++;
           } catch (error) {
             console.error(`Failed to send to ${delegate.email}:`, error);

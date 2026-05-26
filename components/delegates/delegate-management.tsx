@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import {
   Card,
   CardContent,
@@ -21,6 +22,14 @@ import {
 } from "@/components/ui/select";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Search,
   Filter,
   Users,
@@ -34,11 +43,19 @@ import {
   UserCheck,
   Globe,
   Star,
-  SortAsc,
-  SortDesc,
   Eye,
-  Grid,
-  List,
+  Plus,
+  Edit2,
+  Trash2,
+  AlertTriangle,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  Download,
+  Printer,
+  Loader2,
+  Award,
 } from "lucide-react";
 import type { Delegate } from "@/types/delegate";
 import {
@@ -49,15 +66,29 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { DelegateDetailDrawer } from "./delegate-detail-drawer";
+import { createDelegate, updateDelegate, deleteDelegate, getDelegatesByYear } from "@/services/delegates.service";
+import { useToast } from "@/hooks/use-toast";
+import { PremiumBadge } from "./premium-badge";
+import Link from "next/link";
 
 interface DelegateManagementProps {
   delegates: Delegate[];
   selectedDelegates: Delegate[];
   onSelectionChange: (delegates: Delegate[]) => void;
   currentYear: number;
-  onYearChange: (year: number) => void;
-  loading: boolean;
+  eventYears?: number[];
+  currentPage: number;
+  totalPages: number;
+  totalDelegates: number;
+  countries: string[];
+  delegateTypes: string[];
+  initialFilters: {
+    search: string;
+    country: string;
+    status: string;
+    type: string;
+    mode: string;
+  };
 }
 
 export function DelegateManagement({
@@ -65,111 +96,123 @@ export function DelegateManagement({
   selectedDelegates,
   onSelectionChange,
   currentYear,
-  onYearChange,
-  loading,
+  eventYears = [2025, 2024, 2023],
+  currentPage,
+  totalPages,
+  totalDelegates,
+  countries,
+  delegateTypes,
+  initialFilters,
 }: DelegateManagementProps) {
-  const [searchTerm, setSearchTerm] = useState("");
-  const [countryFilter, setCountryFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [delegateTypeFilter, setDelegateTypeFilter] = useState("all");
-  const [attendanceModeFilter, setAttendanceModeFilter] = useState("all");
-  const [sortBy, setSortBy] = useState("name");
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
-  const [viewMode, setViewMode] = useState<"grid" | "table">("grid");
-  const [selectedDelegate, setSelectedDelegate] = useState<Delegate | null>(
-    null
-  );
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const router = useRouter();
+  const { toast } = useToast();
 
-  const filteredAndSortedDelegates = useMemo(() => {
-    const filtered = delegates.filter((delegate) => {
-      const matchesSearch =
-        delegate.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        delegate.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        delegate.organization
-          .toLowerCase()
-          .includes(searchTerm.toLowerCase()) ||
-        delegate.position.toLowerCase().includes(searchTerm.toLowerCase());
+  // Local state for interactive search debouncing
+  const [localSearch, setLocalSearch] = useState(initialFilters.search);
+  const [crudDialogOpen, setCrudDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [selectedDelegate, setSelectedDelegate] = useState<Delegate | null>(null);
 
-      const matchesCountry =
-        countryFilter === "all" || delegate.address.country === countryFilter;
-      const matchesStatus =
-        statusFilter === "all" || delegate.status === statusFilter;
-      const matchesType =
-        delegateTypeFilter === "all" ||
-        delegate.delegateType === delegateTypeFilter;
-      const matchesMode =
-        attendanceModeFilter === "all" ||
-        delegate.attendanceMode === attendanceModeFilter;
+  // Premium Badge States
+  const [badgeModalOpen, setBadgeModalOpen] = useState(false);
+  const [badgeLanguage, setBadgeLanguage] = useState<"en" | "fr" | "bilingual">("bilingual");
+  const [badgeCategoryOverride, setBadgeCategoryOverride] = useState<string>("auto");
+  const [badgeExportProgress, setBadgeExportProgress] = useState(0);
+  const [exportingBadges, setExportingBadges] = useState(false);
+  const [allYearDelegates, setAllYearDelegates] = useState<Delegate[]>([]);
+  const [loadingBadgesData, setLoadingBadgesData] = useState(false);
+  const [badgeScope, setBadgeScope] = useState<"selected" | "all">("all");
 
-      return (
-        matchesSearch &&
-        matchesCountry &&
-        matchesStatus &&
-        matchesType &&
-        matchesMode
-      );
-    });
+  // Badge Operation Center local filters
+  const [modalSearch, setModalSearch] = useState("");
+  const [modalTypeFilter, setModalTypeFilter] = useState("all");
+  const [modalStatusFilter, setModalStatusFilter] = useState("all");
+  const [modalModeFilter, setModalModeFilter] = useState("all");
 
-    // Sort delegates
-    filtered.sort((a, b) => {
-      let aValue: string | number;
-      let bValue: string | number;
+  // Derived state: active source targets
+  const activeSourceList = badgeScope === "selected" ? selectedDelegates : allYearDelegates;
 
-      switch (sortBy) {
-        case "name":
-          aValue = a.fullName;
-          bValue = b.fullName;
-          break;
-        case "organization":
-          aValue = a.organization;
-          bValue = b.organization;
-          break;
-        case "country":
-          aValue = a.address.country;
-          bValue = b.address.country;
-          break;
-        case "created":
-          aValue = new Date(a.createdAt).getTime();
-          bValue = new Date(b.createdAt).getTime();
-          break;
-        default:
-          aValue = a.fullName;
-          bValue = b.fullName;
+  const filteredBadgeTargets = activeSourceList.filter((delegate) => {
+    const fullName = (delegate.fullName || "").toLowerCase();
+    const email = (delegate.email || "").toLowerCase();
+    const position = (delegate.position || "").toLowerCase();
+    const org = (delegate.organization || "").toLowerCase();
+    const searchVal = modalSearch.toLowerCase();
+
+    const matchesSearch =
+      !modalSearch ||
+      fullName.includes(searchVal) ||
+      email.includes(searchVal) ||
+      position.includes(searchVal) ||
+      org.includes(searchVal);
+
+    const matchesType =
+      modalTypeFilter === "all" || delegate.delegateType === modalTypeFilter;
+
+    const matchesStatus =
+      modalStatusFilter === "all" || delegate.status === modalStatusFilter;
+
+    const matchesMode =
+      modalModeFilter === "all" || delegate.attendanceMode === modalModeFilter;
+
+    return matchesSearch && matchesType && matchesStatus && matchesMode;
+  });
+
+  const [formData, setFormData] = useState({
+    title: "Mr.",
+    firstName: "",
+    lastName: "",
+    email: "",
+    phoneNumber: "",
+    nationality: "Kenyan",
+    delegateType: "private",
+    attendanceMode: "physical",
+    organization: "",
+    position: "",
+    status: "pending",
+    eventYear: currentYear,
+    address: {
+      street: "Uhuru Highway",
+      city: "Nairobi",
+      state: "Nairobi County",
+      country: "Kenya",
+      postalCode: "00100",
+    },
+    password: "DefaultPassword123!",
+  });
+
+  // Push filter parameters directly to URL which triggers Server-Side re-rendering
+  const updateUrlParams = (updates: Record<string, string | number | undefined>) => {
+    const params = new URLSearchParams(window.location.search);
+    Object.entries(updates).forEach(([key, val]) => {
+      if (val === "all" || val === "" || val === undefined) {
+        params.delete(key);
+      } else {
+        params.set(key, val.toString());
       }
-
-      if (typeof aValue === "string" && typeof bValue === "string") {
-        return sortOrder === "asc"
-          ? aValue.localeCompare(bValue)
-          : bValue.localeCompare(aValue);
-      }
-
-      return sortOrder === "asc"
-        ? (aValue as number) - (bValue as number)
-        : (bValue as number) - (aValue as number);
     });
+    // Reset page to 1 when filters are changed, except when paginating
+    if (!updates.page) {
+      params.set("page", "1");
+    }
+    router.push(`/delegates?${params.toString()}`);
+  };
 
-    return filtered;
-  }, [
-    delegates,
-    searchTerm,
-    countryFilter,
-    statusFilter,
-    delegateTypeFilter,
-    attendanceModeFilter,
-    sortBy,
-    sortOrder,
-  ]);
+  // Debounce search input updates to URL
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (localSearch !== initialFilters.search) {
+        updateUrlParams({ search: localSearch });
+      }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [localSearch]);
 
-  const countries = Array.from(new Set(delegates.map((d) => d.address.country)))
-    .filter(Boolean)
-    .sort();
-
-  const delegateTypes = Array.from(
-    new Set(delegates.map((d) => d.delegateType))
-  )
-    .filter(Boolean)
-    .sort();
+  // Sync local search when URL state changes
+  useEffect(() => {
+    setLocalSearch(initialFilters.search);
+  }, [initialFilters.search]);
 
   const handleSelectDelegate = (delegate: Delegate, checked: boolean) => {
     if (checked) {
@@ -182,34 +225,18 @@ export function DelegateManagement({
   };
 
   const handleSelectAll = () => {
-    if (selectedDelegates.length === filteredAndSortedDelegates.length) {
+    if (selectedDelegates.length === delegates.length) {
       onSelectionChange([]);
     } else {
-      onSelectionChange(filteredAndSortedDelegates);
+      onSelectionChange(delegates);
     }
   };
 
   const isSelected = (delegate: Delegate) =>
     selectedDelegates.some((d) => d._id === delegate._id);
   const allSelected =
-    filteredAndSortedDelegates.length > 0 &&
-    selectedDelegates.length === filteredAndSortedDelegates.length;
+    delegates.length > 0 && selectedDelegates.length === delegates.length;
 
-  // Theme-adaptive status badge classes
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "approved":
-        return "bg-green-500 text-primary border-primary/20 dark:bg-primary/20 dark:text-primary-foreground";
-      case "pending":
-        return "bg-muted text-muted-foreground border-muted-foreground/20";
-      case "rejected":
-        return "bg-destructive/10 text-destructive border-destructive/20 dark:bg-destructive/20 dark:text-destructive-foreground";
-      default:
-        return "bg-muted text-muted-foreground border-muted-foreground/20";
-    }
-  };
-
-  // Theme-adaptive delegate type badge classes
   const getDelegateTypeColor = (type: string) => {
     switch (type) {
       case "government":
@@ -223,56 +250,294 @@ export function DelegateManagement({
     }
   };
 
-  const handleViewDelegate = (delegate: Delegate) => {
+  const handleOpenAddDialog = () => {
+    setSelectedDelegate(null);
+    setFormData({
+      title: "Mr.",
+      firstName: "",
+      lastName: "",
+      email: "",
+      phoneNumber: "",
+      nationality: "Kenyan",
+      delegateType: "private",
+      attendanceMode: "physical",
+      organization: "",
+      position: "",
+      status: "pending",
+      eventYear: currentYear,
+      address: {
+        street: "Uhuru Highway",
+        city: "Nairobi",
+        state: "Nairobi County",
+        country: "Kenya",
+        postalCode: "00100",
+      },
+      password: "DefaultPassword123!",
+    });
+    setCrudDialogOpen(true);
+  };
+
+  const handleOpenEditDialog = (delegate: Delegate) => {
     setSelectedDelegate(delegate);
-    setDrawerOpen(true);
+    setFormData({
+      title: delegate.title || "Mr.",
+      firstName: delegate.firstName || "",
+      lastName: delegate.lastName || "",
+      email: delegate.email || "",
+      phoneNumber: delegate.phoneNumber || "",
+      nationality: delegate.nationality || "",
+      delegateType: delegate.delegateType || "private",
+      attendanceMode: delegate.attendanceMode || "physical",
+      organization: delegate.organization || "",
+      position: delegate.position || "",
+      status: delegate.status || "pending",
+      eventYear: delegate.eventYear || currentYear,
+      address: {
+        street: delegate.address?.street || "",
+        city: delegate.address?.city || "",
+        state: delegate.address?.state || "",
+        country: delegate.address?.country || "",
+        postalCode: delegate.address?.postalCode || "",
+      },
+      password: "", // Keep existing
+    });
+    setCrudDialogOpen(true);
+  };
+
+  const handleOpenDeleteDialog = (delegate: Delegate) => {
+    setSelectedDelegate(delegate);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleOpenBadgeModal = async (scope: "selected" | "all") => {
+    setBadgeScope(scope);
+    setBadgeCategoryOverride("auto");
+    setBadgeLanguage("bilingual");
+    
+    // Reset filters
+    setModalSearch("");
+    setModalTypeFilter("all");
+    setModalStatusFilter("all");
+    setModalModeFilter("all");
+    
+    setBadgeModalOpen(true);
+    setLoadingBadgesData(true);
+    try {
+      const allDels = await getDelegatesByYear(currentYear);
+      setAllYearDelegates(allDels);
+    } catch (err: any) {
+      console.error(err);
+      toast({
+        title: "Connection Alert",
+        description: "Failed to load complete directory. Fallback page items applied.",
+        variant: "destructive",
+      });
+      setAllYearDelegates(delegates);
+    } finally {
+      setLoadingBadgesData(false);
+    }
+  };
+
+  const handleExportBadges = async () => {
+    setExportingBadges(true);
+    setBadgeExportProgress(0);
+    try {
+      const { toPng } = await import("html-to-image");
+      const JSZip = (await import("jszip")).default;
+      const { saveAs } = await import("file-saver");
+      
+      const total = filteredBadgeTargets.length;
+      let completed = 0;
+
+      if (total === 0) {
+        toast({
+          title: "No Targets Selected",
+          description: "There are no badges matching your filter options to export.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (total === 1) {
+        const delegate = filteredBadgeTargets[0];
+        const badgeEl = document.getElementById(`badge-card-render-${delegate._id}`);
+        if (badgeEl) {
+          await new Promise((resolve) => setTimeout(resolve, 350));
+          const dataUrl = await toPng(badgeEl, {
+            quality: 1.0,
+            pixelRatio: 2.2,
+            cacheBust: true,
+          });
+
+          const link = document.createElement("a");
+          link.download = `badge_${delegate.firstName}_${delegate.lastName}_${badgeLanguage}.png`.replace(/\s+/g, "_");
+          link.href = dataUrl;
+          link.click();
+          
+          toast({
+            title: "Badge Downloaded",
+            description: `Saved badge for ${delegate.firstName} ${delegate.lastName} successfully.`,
+          });
+          setBadgeModalOpen(false);
+        }
+      } else {
+        const zip = new JSZip();
+        for (const delegate of filteredBadgeTargets) {
+          const badgeEl = document.getElementById(`badge-card-render-${delegate._id}`);
+          if (badgeEl) {
+            await new Promise((resolve) => setTimeout(resolve, 350));
+            const dataUrl = await toPng(badgeEl, {
+              quality: 1.0,
+              pixelRatio: 2.2,
+              cacheBust: true,
+            });
+
+            const base64Data = dataUrl.split(",")[1];
+            const fileName = `badge_${delegate.firstName}_${delegate.lastName}_${badgeLanguage}.png`.replace(/\s+/g, "_");
+            zip.file(fileName, base64Data, { base64: true });
+          }
+          completed++;
+          setBadgeExportProgress((completed / total) * 100);
+        }
+
+        const content = await zip.generateAsync({ type: "blob" });
+        saveAs(content, `Morocco_AGM_Badges_${currentYear}.zip`);
+
+        toast({
+          title: "ZIP Archive Generated",
+          description: `Successfully bundled ${total} high-fidelity badge images in a single ZIP.`,
+        });
+        setBadgeModalOpen(false);
+      }
+    } catch (err: any) {
+      console.error(err);
+      toast({
+        title: "Export Failed",
+        description: err.message || "Failed to generate badge credentials.",
+        variant: "destructive",
+      });
+    } finally {
+      setExportingBadges(false);
+    }
+  };
+
+  const handlePrintBadges = () => {
+    setTimeout(() => {
+      window.print();
+    }, 400);
+  };
+
+  const handleFormSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      if (selectedDelegate) {
+        const payload: any = { ...formData };
+        if (!payload.password) delete payload.password;
+        await updateDelegate(selectedDelegate._id, payload);
+        toast({
+          title: "Delegate Updates Saved",
+          description: `Successfully modified credentials for ${formData.firstName} ${formData.lastName}`,
+        });
+      } else {
+        await createDelegate(formData);
+        toast({
+          title: "Delegate Registered",
+          description: `Successfully registered new delegate ${formData.firstName} ${formData.lastName}`,
+        });
+      }
+      setCrudDialogOpen(false);
+      router.refresh();
+    } catch (err: any) {
+      console.error(err);
+      toast({
+        title: "Registration Failed",
+        description: err.message || "Failed to submit delegate details. Verify event year match.",
+        variant: "destructive",
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDeleteDelegate = async () => {
+    if (!selectedDelegate) return;
+    setSubmitting(true);
+    try {
+      await deleteDelegate(selectedDelegate._id);
+      toast({
+        title: "Registration Revoked",
+        description: `Successfully deleted registration for ${selectedDelegate.firstName} ${selectedDelegate.lastName}`,
+      });
+      setDeleteDialogOpen(false);
+      router.refresh();
+    } catch (err: any) {
+      console.error(err);
+      toast({
+        title: "Revocation Failed",
+        description: err.message || "Failed to remove delegate.",
+        variant: "destructive",
+      });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
     <Card className="border shadow-xl backdrop-blur-sm bg-background">
       <div className="pb-6 p-2">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
           <div>
             <CardTitle className="text-2xl font-bold text-foreground flex items-center">
               <Users className="h-6 w-6 mr-3 text-primary" />
               Delegate Directory
             </CardTitle>
-            <CardDescription className="text-base mt-2 text-muted-foreground">
-              Advanced delegate management with smart filtering and bulk
-              operations
+            <CardDescription className="mt-1 ml-9">
+              Showing {delegates.length} delegates of {totalDelegates} total entries.
             </CardDescription>
           </div>
-          <div className="flex items-center space-x-3">
-            <div className="flex items-center rounded-lg p-1">
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
+            {selectedDelegates.length > 0 && (
               <Button
-                variant={viewMode === "grid" ? "default" : "ghost"}
-                size="sm"
-                onClick={() => setViewMode("grid")}
-                className="h-8 px-3"
+                onClick={() => handleOpenBadgeModal("selected")}
+                className="h-9 px-3 bg-indigo-600 hover:bg-indigo-700 text-white font-medium shadow-md transition-all duration-150 animate-in fade-in zoom-in-95"
               >
-                <Grid className="h-4 w-4" />
+                <Award className="h-4 w-4 mr-1.5" />
+                Badge Selected ({selectedDelegates.length})
               </Button>
-              <Button
-                variant={viewMode === "table" ? "default" : "ghost"}
-                size="sm"
-                onClick={() => setViewMode("table")}
-                className="h-8 px-3"
-              >
-                <List className="h-4 w-4" />
-              </Button>
-            </div>
+            )}
+
+            <Button
+              onClick={() => handleOpenBadgeModal("all")}
+              variant="outline"
+              className="h-9 px-3 border border-indigo-200 text-indigo-700 hover:bg-indigo-50 shadow-sm"
+            >
+              <Award className="h-4 w-4 mr-1.5 text-indigo-600" />
+              Badge All ({totalDelegates})
+            </Button>
+
+            <Button
+              onClick={handleOpenAddDialog}
+              className="h-9 px-3 bg-green-600 hover:bg-green-700 text-white font-medium shadow-sm transition-all"
+            >
+              <Plus className="h-4 w-4 mr-1.5" />
+              Add Delegate
+            </Button>
+            
             <Select
               value={currentYear.toString()}
-              onValueChange={(value) => onYearChange(Number.parseInt(value))}
+              onValueChange={(value) => updateUrlParams({ year: value })}
             >
-              <SelectTrigger className="w-32 border">
-                <Calendar className="h-4 w-4 mr-2" />
+              <SelectTrigger className="w-28 border">
+                <Calendar className="h-4 w-4 mr-1.5 text-emerald-600" />
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="2025">2025</SelectItem>
-                <SelectItem value="2024">2024</SelectItem>
-                <SelectItem value="2023">2023</SelectItem>
+                {eventYears.map((yr) => (
+                  <SelectItem key={yr} value={yr.toString()}>
+                    {yr}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -281,20 +546,20 @@ export function DelegateManagement({
 
       <div className="space-y-6 p-2">
         {/* Advanced Filters */}
-        <div className="grid grid-cols-1 lg:grid-cols-6 gap-4">
-          <div className="lg:col-span-2 relative">
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
+          <div className="lg:col-span-1 relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
             <Input
-              placeholder="Search delegates, organizations, positions..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search directory..."
+              value={localSearch}
+              onChange={(e) => setLocalSearch(e.target.value)}
               className="pl-10 border focus:border-primary bg-background"
             />
           </div>
 
-          <Select value={countryFilter} onValueChange={setCountryFilter}>
+          <Select value={initialFilters.country || "all"} onValueChange={(val) => updateUrlParams({ country: val })}>
             <SelectTrigger className="border">
-              <Globe className="h-4 w-4 mr-2" />
+              <Globe className="h-4 w-4 mr-2 text-primary" />
               <SelectValue placeholder="Country" />
             </SelectTrigger>
             <SelectContent>
@@ -307,9 +572,9 @@ export function DelegateManagement({
             </SelectContent>
           </Select>
 
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <Select value={initialFilters.status || "all"} onValueChange={(val) => updateUrlParams({ status: val })}>
             <SelectTrigger className="border">
-              <UserCheck className="h-4 w-4 mr-2" />
+              <UserCheck className="h-4 w-4 mr-2 text-primary" />
               <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent>
@@ -320,12 +585,9 @@ export function DelegateManagement({
             </SelectContent>
           </Select>
 
-          <Select
-            value={delegateTypeFilter}
-            onValueChange={setDelegateTypeFilter}
-          >
+          <Select value={initialFilters.type || "all"} onValueChange={(val) => updateUrlParams({ type: val })}>
             <SelectTrigger className="border">
-              <Building className="h-4 w-4 mr-2" />
+              <Building className="h-4 w-4 mr-2 text-primary" />
               <SelectValue placeholder="Type" />
             </SelectTrigger>
             <SelectContent>
@@ -338,12 +600,9 @@ export function DelegateManagement({
             </SelectContent>
           </Select>
 
-          <Select
-            value={attendanceModeFilter}
-            onValueChange={setAttendanceModeFilter}
-          >
+          <Select value={initialFilters.mode || "all"} onValueChange={(val) => updateUrlParams({ mode: val })}>
             <SelectTrigger className="border">
-              <Filter className="h-4 w-4 mr-2" />
+              <Filter className="h-4 w-4 mr-2 text-primary" />
               <SelectValue placeholder="Mode" />
             </SelectTrigger>
             <SelectContent>
@@ -354,168 +613,12 @@ export function DelegateManagement({
           </Select>
         </div>
 
-        {/* Sort Controls */}
-        <div className="flex items-center justify-between p-4 rounded-xl border bg-muted">
-          <div className="flex items-center space-x-4">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleSelectAll}
-              className="border hover:bg-muted bg-background"
-            >
-              {allSelected ? (
-                <CheckSquare className="h-4 w-4 mr-2" />
-              ) : (
-                <Square className="h-4 w-4 mr-2" />
-              )}
-              {allSelected ? "Deselect All" : "Select All"}
-            </Button>
-            <span className="text-sm font-medium text-foreground">
-              {selectedDelegates.length} of {filteredAndSortedDelegates.length}{" "}
-              selected
-            </span>
-          </div>
-
-          <div className="flex items-center space-x-2">
-            <Select value={sortBy} onValueChange={setSortBy}>
-              <SelectTrigger className="w-40 border bg-background">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="name">Name</SelectItem>
-                <SelectItem value="organization">Organization</SelectItem>
-                <SelectItem value="country">Country</SelectItem>
-                <SelectItem value="created">Date Added</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setSortOrder(sortOrder === "asc" ? "desc" : "asc")}
-              className="border bg-background"
-            >
-              {sortOrder === "asc" ? (
-                <SortAsc className="h-4 w-4" />
-              ) : (
-                <SortDesc className="h-4 w-4" />
-              )}
-            </Button>
-          </div>
-        </div>
-
-        {/* Grid View */}
-        {viewMode === "grid" && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 max-h-[600px] overflow-y-auto">
-            {filteredAndSortedDelegates.map((delegate) => (
-              <div
-                key={delegate._id}
-                className={`group relative p-6 rounded-xl border-2 transition-all duration-200 hover:shadow-lg ${
-                  isSelected(delegate)
-                    ? "bg-muted border-primary shadow-md"
-                    : "bg-background border hover:border-primary hover:bg-muted/70"
-                }`}
-              >
-                <div className="flex items-start space-x-4">
-                  <div className="relative">
-                    <Checkbox
-                      checked={isSelected(delegate)}
-                      onCheckedChange={(checked) =>
-                        handleSelectDelegate(delegate, checked as boolean)
-                      }
-                      className="absolute -top-2 -left-2 z-10 data-[state=checked]:bg-emerald-600 data-[state=checked]:border-emerald-600"
-                    />
-                    <Avatar className="h-16 w-16 border-4 border-background shadow-lg">
-                      <AvatarImage
-                        src={delegate.profilePicture || "/placeholder.svg"}
-                      />
-                      <AvatarFallback className="bg-accent text-accent-foreground font-semibold text-lg">
-                        {delegate.firstName[0]}
-                        {delegate.lastName[0]}
-                      </AvatarFallback>
-                    </Avatar>
-                    {delegate.isAdmin && (
-                      <div className="absolute -bottom-1 -right-1 h-6 w-6 bg-accent rounded-full flex items-center justify-center">
-                        <Star className="h-3 w-3 text-accent-foreground" />
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center space-x-2 mb-2">
-                      <h3 className="font-bold text-foreground text-lg truncate">
-                        {delegate.title} {delegate.fullName}
-                      </h3>
-                      <Badge variant={delegate.status as any}>
-                        {delegate.status}
-                      </Badge>
-                    </div>
-
-                    <div className="space-y-2">
-                      <div className="flex items-center space-x-2 text-sm text-muted-foreground">
-                        <Building className="h-4 w-4 text-primary" />
-                        <span className="font-medium">{delegate.position}</span>
-                        <span className="text-muted-foreground">at</span>
-                        <span className="truncate">
-                          {delegate.organization}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center space-x-2 text-sm text-muted-foreground">
-                        <MapPin className="h-4 w-4 text-primary" />
-                        <span>
-                          {delegate.address.city}, {delegate.address.country}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center space-x-2 text-sm text-muted-foreground">
-                        <Mail className="h-4 w-4 text-primary" />
-                        <span className="truncate">{delegate.email}</span>
-                      </div>
-
-                      <div className="flex items-center space-x-2 text-sm text-muted-foreground">
-                        <Phone className="h-4 w-4 text-primary" />
-                        <span>{delegate.phoneNumber}</span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between mt-4">
-                      <div className="flex items-center space-x-2">
-                        <Badge
-                          variant="outline"
-                          className={getDelegateTypeColor(
-                            delegate.delegateType
-                          )}
-                        >
-                          {delegate.delegateType}
-                        </Badge>
-                        <Badge variant={delegate.attendanceMode as any}>
-                          {delegate.attendanceMode}
-                        </Badge>
-                      </div>
-
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleViewDelegate(delegate)}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        <Eye className="h-4 w-4 mr-1" />
-                        View
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
         {/* Table View */}
-        {viewMode === "table" && (
-          <div className="border rounded-xl overflow-hidden bg-background backdrop-blur-sm">
-            <div className="max-h-[600px] overflow-y-auto">
-              <Table>
-                <TableHeader className="sticky top-0 bg-muted z-10">
+        <div className="border rounded-xl overflow-hidden bg-background shadow-md">
+          <div className="max-h-[500px] overflow-y-auto">
+            <Table>
+              <TableHeader className="sticky top-0 bg-muted z-10">
+                <TableRow>
                   <TableHead className="w-12">
                     <Checkbox
                       checked={allSelected}
@@ -523,139 +626,752 @@ export function DelegateManagement({
                       className="data-[state=checked]:bg-emerald-600 data-[state=checked]:border-emerald-600"
                     />
                   </TableHead>
-                  <TableHead>Delegate</TableHead>
-                  <TableHead>Organization</TableHead>
-                  <TableHead>City</TableHead>
-                  <TableHead>Country</TableHead>
-                  <TableHead>Status</TableHead>
+                  <TableHead>Delegate Name</TableHead>
+                  <TableHead>Organization / Position</TableHead>
+                  <TableHead>Location</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Mode</TableHead>
+                  <TableHead>Status</TableHead>
                   <TableHead>Check-in</TableHead>
-                  <TableHead className="w-20">Actions</TableHead>
-                </TableHeader>
-                <TableBody>
-                  {filteredAndSortedDelegates.map((delegate) => (
-                    <TableRow
-                      key={delegate._id}
-                      className={`border transition-colors ${
-                        isSelected(delegate) ? "bg-muted" : "hover:bg-muted/70"
-                      }`}
-                    >
-                      <TableCell>
-                        <Checkbox
-                          checked={isSelected(delegate)}
-                          onCheckedChange={(checked) =>
-                            handleSelectDelegate(delegate, checked as boolean)
-                          }
-                          className="data-[state=checked]:bg-emerald-600 data-[state=checked]:border-emerald-600"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center space-x-3">
-                          <div className="relative">
-                            <Avatar className="h-10 w-10 border-2 border-background shadow-sm">
-                              <AvatarImage
-                                src={
-                                  delegate.profilePicture || "/placeholder.svg"
-                                }
-                              />
-                              <AvatarFallback className="bg-accent text-accent-foreground font-semibold">
-                                {delegate.firstName[0]}
-                                {delegate.lastName[0]}
-                              </AvatarFallback>
-                            </Avatar>
-                            {delegate.isAdmin && (
-                              <div className="absolute -bottom-1 -right-1 h-4 w-4 bg-accent rounded-full flex items-center justify-center">
-                                <Star className="h-2 w-2 text-accent-foreground" />
-                              </div>
-                            )}
+                  <TableHead className="w-24 text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {delegates.map((delegate) => (
+                  <TableRow
+                    key={delegate._id}
+                    className={`border transition-colors hover:bg-muted/40 ${
+                      isSelected(delegate) ? "bg-muted" : ""
+                    }`}
+                  >
+                    <TableCell>
+                      <Checkbox
+                        checked={isSelected(delegate)}
+                        onCheckedChange={(checked) =>
+                          handleSelectDelegate(delegate, checked as boolean)
+                        }
+                        className="data-[state=checked]:bg-emerald-600 data-[state=checked]:border-emerald-600"
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center space-x-3">
+                        <Avatar className="h-9 w-9 border shadow-sm">
+                          <AvatarImage src={delegate.profilePicture || "/placeholder.svg"} />
+                          <AvatarFallback className="bg-accent text-accent-foreground font-bold text-xs uppercase">
+                            {delegate.firstName ? delegate.firstName[0] : ""}
+                            {delegate.lastName ? delegate.lastName[0] : ""}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <div className="font-bold text-foreground text-sm truncate max-w-[170px]" title={`${delegate.title || ""} ${delegate.fullName || ""}`}>
+                            {delegate.title} {delegate.fullName}
                           </div>
-                          <div>
-                            <div className="font-semibold text-foreground">
-                              {delegate.title} {delegate.fullName}
-                            </div>
-                            <div className="text-sm text-muted-foreground">
-                              {delegate.position}
-                            </div>
-                          </div>
+                          <div className="text-xs text-muted-foreground truncate max-w-[170px]" title={delegate.email}>{delegate.email}</div>
                         </div>
-                      </TableCell>
-                      <TableCell className="font-medium text-foreground">
-                        {delegate.organization}
-                      </TableCell>
-                      <TableCell className="font-medium text-foreground">
-                        {delegate.address.city}
-                      </TableCell>
-                      <TableCell className="font-medium text-foreground">
-                        {delegate.address.country}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={delegate.status as any}>
-                          <span className="capitalize">{delegate.status}</span>
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant="outline"
-                          className={getDelegateTypeColor(
-                            delegate.delegateType
-                          )}
-                        >
-                          {delegate.delegateType}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={delegate.attendanceMode as any}>
-                          {delegate.attendanceMode}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center space-x-1">
-                          {delegate.hasCheckedIn ? (
-                            <CheckSquare className="h-4 w-4 text-primary" />
-                          ) : (
-                            <Square className="h-4 w-4 text-muted-foreground" />
-                          )}
-                          <span className="text-sm font-medium">
-                            {delegate.hasCheckedIn ? "Yes" : "No"}
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="font-semibold text-foreground text-sm truncate max-w-[180px]" title={delegate.organization}>{delegate.organization}</div>
+                      <div className="text-xs text-muted-foreground truncate max-w-[180px]" title={delegate.position}>{delegate.position}</div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="text-sm font-medium text-foreground">{delegate.address?.city}</div>
+                      <div className="text-xs text-muted-foreground">{delegate.address?.country}</div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className={`capitalize font-semibold ${getDelegateTypeColor(delegate.delegateType)}`}>
+                        {delegate.delegateType}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="secondary" className="capitalize text-xs">
+                        {delegate.attendanceMode}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Badge className="capitalize font-medium text-xs">
+                        {delegate.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center space-x-1 text-sm font-medium">
+                        {delegate.hasCheckedIn ? (
+                          <Badge className="bg-green-600 text-white border-0 font-semibold">Yes</Badge>
+                        ) : (
+                          <Badge variant="outline" className="border-border text-muted-foreground">No</Badge>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end space-x-1">
                         <Button
                           size="sm"
-                          variant="outline"
-                          onClick={() => handleViewDelegate(delegate)}
-                          className="h-8 px-2"
+                          variant="ghost"
+                          className="h-8 w-8 p-0 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50/50"
+                          onClick={() => {
+                            setBadgeTargets([delegate]);
+                            setBadgeCategoryOverride("auto");
+                            setBadgeLanguage("bilingual");
+                            setBadgeModalOpen(true);
+                          }}
+                          title="Preview & Generate Badge"
                         >
-                          <Eye className="h-3 w-3" />
+                          <Award className="h-4.5 w-4.5" />
                         </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                        <Link href={`/delegates/${delegate._id}`}>
+                          <Button size="sm" variant="ghost" className="h-8 w-8 p-0">
+                            <Eye className="h-4 w-4 text-muted-foreground hover:text-foreground" />
+                          </Button>
+                        </Link>
+                        <Link href={`/delegates/${delegate._id}/edit`}>
+                          <Button size="sm" variant="ghost" className="h-8 w-8 p-0">
+                            <Edit2 className="h-4 w-4 text-muted-foreground hover:text-indigo-600" />
+                          </Button>
+                        </Link>
+                        <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => handleOpenDeleteDialog(delegate)}>
+                          <Trash2 className="h-4 w-4 text-muted-foreground hover:text-red-600" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {delegates.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={9} className="text-center py-12 text-muted-foreground">
+                      <Users className="h-12 w-12 mx-auto mb-3 text-muted-foreground/40" />
+                      No delegate registrations found.
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+
+        {/* Bottom Advanced Pagination Controls */}
+        {totalPages > 1 && (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 border rounded-xl bg-muted/40">
+            <span className="text-sm font-medium text-muted-foreground">
+              Page <strong>{currentPage}</strong> of <strong>{totalPages}</strong> ({totalDelegates} total entries)
+            </span>
+
+            <div className="flex items-center space-x-1.5">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={() => updateUrlParams({ page: 1 })}
+                disabled={currentPage === 1}
+              >
+                <ChevronsLeft className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={() => updateUrlParams({ page: currentPage - 1 })}
+                disabled={currentPage === 1}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+
+              {Array.from({ length: totalPages }).map((_, idx) => {
+                const pg = idx + 1;
+                // Only show active page and neighbors
+                if (pg === 1 || pg === totalPages || Math.abs(pg - currentPage) <= 1) {
+                  return (
+                    <Button
+                      key={pg}
+                      variant={pg === currentPage ? "default" : "outline"}
+                      size="sm"
+                      className="h-8 w-8 text-xs font-bold"
+                      onClick={() => updateUrlParams({ page: pg })}
+                    >
+                      {pg}
+                    </Button>
+                  );
+                }
+                if (pg === 2 || pg === totalPages - 1) {
+                  return <span key={pg} className="px-1.5 text-muted-foreground text-sm">...</span>;
+                }
+                return null;
+              })}
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={() => updateUrlParams({ page: currentPage + 1 })}
+                disabled={currentPage === totalPages}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={() => updateUrlParams({ page: totalPages })}
+                disabled={currentPage === totalPages}
+              >
+                <ChevronsRight className="h-4 w-4" />
+              </Button>
             </div>
           </div>
         )}
 
-        {filteredAndSortedDelegates.length === 0 && (
-          <div className="text-center py-12">
-            <Users className="h-16 w-16 mx-auto mb-4 text-gray-300" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">
-              No delegates found
-            </h3>
-            <p className="text-gray-500">
-              Try adjusting your search criteria or filters
-            </p>
-          </div>
-        )}
       </div>
-      <DelegateDetailDrawer
-        delegate={selectedDelegate}
-        open={drawerOpen}
-        onOpenChange={setDrawerOpen}
-      />
+
+      {/* Add Delegate Dialog Modal */}
+      <Dialog open={crudDialogOpen} onOpenChange={setCrudDialogOpen}>
+        <DialogContent className="max-w-2xl border bg-card max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold">
+              Register New Event Delegate
+            </DialogTitle>
+            <DialogDescription>
+              Provide event delegate credentials, registration year, and attendance details.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleFormSubmit} className="space-y-4">
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase text-muted-foreground">Title</label>
+                <Select
+                  value={formData.title}
+                  onValueChange={(val) => setFormData({ ...formData, title: val })}
+                >
+                  <SelectTrigger className="border bg-background">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Mr.">Mr.</SelectItem>
+                    <SelectItem value="Mrs.">Mrs.</SelectItem>
+                    <SelectItem value="Ms.">Ms.</SelectItem>
+                    <SelectItem value="Dr.">Dr.</SelectItem>
+                    <SelectItem value="Prof.">Prof.</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase text-muted-foreground">First Name</label>
+                <Input
+                  required
+                  value={formData.firstName}
+                  onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
+                  className="border bg-background"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase text-muted-foreground">Last Name</label>
+                <Input
+                  required
+                  value={formData.lastName}
+                  onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
+                  className="border bg-background"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase text-muted-foreground">Email Address</label>
+                <Input
+                  required
+                  type="email"
+                  value={formData.email}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  className="border bg-background"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase text-muted-foreground">Phone Number</label>
+                <Input
+                  required
+                  value={formData.phoneNumber}
+                  onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
+                  className="border bg-background"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase text-muted-foreground">Nationality</label>
+                <Input
+                  required
+                  value={formData.nationality}
+                  onChange={(e) => setFormData({ ...formData, nationality: e.target.value })}
+                  className="border bg-background"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase text-muted-foreground">Organization</label>
+                <Input
+                  required
+                  value={formData.organization}
+                  onChange={(e) => setFormData({ ...formData, organization: e.target.value })}
+                  className="border bg-background"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase text-muted-foreground">Position</label>
+                <Input
+                  required
+                  value={formData.position}
+                  onChange={(e) => setFormData({ ...formData, position: e.target.value })}
+                  className="border bg-background"
+                />
+              </div>
+            </div>
+
+            <div className="border-t pt-4">
+              <h4 className="text-sm font-bold text-foreground mb-3 flex items-center">
+                <MapPin className="h-4 w-4 mr-2 text-primary" />
+                Address Details
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold uppercase text-muted-foreground">Street Address</label>
+                  <Input
+                    required
+                    value={formData.address.street}
+                    onChange={(e) => setFormData({ ...formData, address: { ...formData.address, street: e.target.value } })}
+                    className="border bg-background"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold uppercase text-muted-foreground">City</label>
+                    <Input
+                      required
+                      value={formData.address.city}
+                      onChange={(e) => setFormData({ ...formData, address: { ...formData.address, city: e.target.value } })}
+                      className="border bg-background"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold uppercase text-muted-foreground">State</label>
+                    <Input
+                      required
+                      value={formData.address.state}
+                      onChange={(e) => setFormData({ ...formData, address: { ...formData.address, state: e.target.value } })}
+                      className="border bg-background"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold uppercase text-muted-foreground">Country</label>
+                  <Input
+                    required
+                    value={formData.address.country}
+                    onChange={(e) => setFormData({ ...formData, address: { ...formData.address, country: e.target.value } })}
+                    className="border bg-background"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold uppercase text-muted-foreground">Postal Code</label>
+                  <Input
+                    required
+                    value={formData.address.postalCode}
+                    onChange={(e) => setFormData({ ...formData, address: { ...formData.address, postalCode: e.target.value } })}
+                    className="border bg-background"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t pt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase text-muted-foreground">Delegate Type</label>
+                <Select
+                  value={formData.delegateType}
+                  onValueChange={(val) => setFormData({ ...formData, delegateType: val })}
+                >
+                  <SelectTrigger className="border bg-background">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="government">Government Representative</SelectItem>
+                    <SelectItem value="private">Private Partner</SelectItem>
+                    <SelectItem value="ngo">NGO Observer</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase text-muted-foreground">Attendance Mode</label>
+                <Select
+                  value={formData.attendanceMode}
+                  onValueChange={(val) => setFormData({ ...formData, attendanceMode: val })}
+                >
+                  <SelectTrigger className="border bg-background">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="physical">Physical (In-Person)</SelectItem>
+                    <SelectItem value="virtual">Virtual (Zoom Stream)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase text-muted-foreground">Status</label>
+                <Select
+                  value={formData.status}
+                  onValueChange={(val) => setFormData({ ...formData, status: val })}
+                >
+                  <SelectTrigger className="border bg-background">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="approved">Approved</SelectItem>
+                    <SelectItem value="rejected">Rejected</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-semibold uppercase text-muted-foreground">
+                Delegate Password
+              </label>
+              <Input
+                type="password"
+                required
+                value={formData.password}
+                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                className="border bg-background"
+              />
+            </div>
+
+            <DialogFooter className="pt-4 border-t">
+              <Button type="button" variant="outline" onClick={() => setCrudDialogOpen(false)} disabled={submitting}>
+                Cancel
+              </Button>
+              <Button type="submit" className="bg-green-600 hover:bg-green-700 text-white font-medium" disabled={submitting}>
+                {submitting ? "Submitting..." : "Register Delegate"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Delegate Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent className="max-w-md border bg-card">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold flex items-center text-red-600">
+              <AlertTriangle className="h-5 w-5 mr-2" />
+              Revoke Delegate Access?
+            </DialogTitle>
+            <DialogDescription>
+              This will permanently delete the registration record for <strong className="text-foreground">{selectedDelegate?.firstName} {selectedDelegate?.lastName}</strong> for Event {currentYear}. This action is irreversible.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="pt-4 border-t">
+            <Button type="button" variant="outline" onClick={() => setDeleteDialogOpen(false)} disabled={submitting}>
+              Dismiss
+            </Button>
+            <Button type="button" className="bg-red-600 hover:bg-red-700 text-white font-medium" onClick={handleDeleteDelegate} disabled={submitting}>
+              {submitting ? "Revoking..." : "Revoke Access"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dynamic Badge Operations & Print Center Modal */}
+      <Dialog open={badgeModalOpen} onOpenChange={setBadgeModalOpen}>
+        <DialogContent className="max-w-5xl border bg-card max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold flex items-center gap-2">
+              <Award className="h-6 w-6 text-indigo-600 animate-pulse" />
+              Morocco 45th AGM - Badge Operation Center
+            </DialogTitle>
+            <DialogDescription>
+              Preview, filter, customize, and export high-fidelity bilingual credentials.
+            </DialogDescription>
+          </DialogHeader>
+
+          {loadingBadgesData ? (
+            <div className="flex flex-col items-center justify-center p-24 space-y-4">
+              <Loader2 className="h-10 w-10 text-indigo-600 animate-spin" />
+              <p className="text-sm font-semibold text-muted-foreground">
+                Fetching complete delegate list for Event {currentYear}...
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mt-2">
+              {/* Left side: Live Interactive Scrollable Previews */}
+              <div className="lg:col-span-7 space-y-4">
+                <div className="text-sm font-bold text-muted-foreground flex justify-between">
+                  <span>Badge Preview Panel ({filteredBadgeTargets.length} Card{filteredBadgeTargets.length !== 1 ? "s" : ""})</span>
+                  <span className="text-indigo-600">Morocco AGM Layout</span>
+                </div>
+                {filteredBadgeTargets.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center p-12 bg-muted/20 border border-dashed rounded-2xl h-[480px]">
+                    <Award className="h-12 w-12 text-muted-foreground/30 mb-2" />
+                    <p className="text-sm text-muted-foreground font-semibold">No matching delegates found.</p>
+                    <p className="text-xs text-muted-foreground/80 mt-1">Try adjusting your filters on the right.</p>
+                  </div>
+                ) : (
+                  <div className="max-h-[480px] overflow-y-auto p-6 flex flex-wrap gap-8 justify-center bg-muted/30 rounded-2xl border shadow-inner">
+                    {filteredBadgeTargets.map((delegate) => (
+                      <div
+                        key={delegate._id}
+                        className="scale-90 origin-top -mb-8 hover:scale-95 transition-transform duration-200"
+                      >
+                        <PremiumBadge
+                          id={`badge-card-render-${delegate._id}`}
+                          delegate={delegate}
+                          language={badgeLanguage}
+                          categoryOverride={badgeCategoryOverride === "auto" ? undefined : badgeCategoryOverride}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Right side: Operations, Filters & Configurations Panel */}
+              <div className="lg:col-span-5 space-y-5 flex flex-col justify-between">
+                <div className="space-y-4">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                    Badge Properties
+                  </h4>
+
+                  {/* Scope selector */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold uppercase text-muted-foreground">Target Scope</label>
+                    <Select
+                      value={badgeScope}
+                      onValueChange={(val: any) => setBadgeScope(val)}
+                    >
+                      <SelectTrigger className="border bg-background">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {selectedDelegates.length > 0 && (
+                          <SelectItem value="selected">Selected Checkboxes ({selectedDelegates.length})</SelectItem>
+                        )}
+                        <SelectItem value="all">All year registered delegates ({allYearDelegates.length})</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Language selection */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold uppercase text-muted-foreground">Credential Language</label>
+                    <Select
+                      value={badgeLanguage}
+                      onValueChange={(val: any) => setBadgeLanguage(val)}
+                    >
+                      <SelectTrigger className="border bg-background">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="bilingual">Bilingual (English & French)</SelectItem>
+                        <SelectItem value="fr">French Only (Français)</SelectItem>
+                        <SelectItem value="en">English Only (English)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Category Override selection */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold uppercase text-muted-foreground">Category Banner Override</label>
+                    <Select
+                      value={badgeCategoryOverride}
+                      onValueChange={(val) => setBadgeCategoryOverride(val)}
+                    >
+                      <SelectTrigger className="border bg-background">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="auto">Automatic (Read Delegate Type)</SelectItem>
+                        <SelectItem value="VIP">VIP (Rich Red)</SelectItem>
+                        <SelectItem value="STAFF">STAFF (Forest Green)</SelectItem>
+                        <SelectItem value="DELEGATE">DELEGATE (Emerald)</SelectItem>
+                        <SelectItem value="OBSERVER">OBSERVER (Charcoal)</SelectItem>
+                        <SelectItem value="PARTNER">PARTNER (Amber Gold)</SelectItem>
+                        <SelectItem value="SPONSOR">SPONSOR (Amber Gold)</SelectItem>
+                        <SelectItem value="GUEST">GUEST (Royal Purple)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Filters Section inside Dialog */}
+                  <div className="space-y-3 pt-3 border-t">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                      Dynamic Filter Subset
+                    </h4>
+
+                    {/* Search Field */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold uppercase text-muted-foreground">Search by Name/Org</label>
+                      <Input
+                        placeholder="Search badges..."
+                        value={modalSearch}
+                        onChange={(e) => setModalSearch(e.target.value)}
+                        className="border bg-background h-8 text-xs focus-visible:ring-indigo-500"
+                      />
+                    </div>
+
+                    {/* Grid selects */}
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold uppercase text-muted-foreground">Type</label>
+                        <select
+                          value={modalTypeFilter}
+                          onChange={(e) => setModalTypeFilter(e.target.value)}
+                          className="w-full p-1 border rounded-lg bg-background text-xs focus:outline-none focus:border-indigo-500 h-8 font-semibold"
+                        >
+                          <option value="all">All Types</option>
+                          <option value="government">Government</option>
+                          <option value="private">Private Partner</option>
+                          <option value="ngo">NGO Observer</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold uppercase text-muted-foreground">Mode</label>
+                        <select
+                          value={modalModeFilter}
+                          onChange={(e) => setModalModeFilter(e.target.value)}
+                          className="w-full p-1 border rounded-lg bg-background text-xs focus:outline-none focus:border-indigo-500 h-8 font-semibold"
+                        >
+                          <option value="all">All Modes</option>
+                          <option value="physical">Physical</option>
+                          <option value="virtual">Virtual</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-1 col-span-2">
+                        <label className="text-[10px] font-bold uppercase text-muted-foreground">Check-in / Status</label>
+                        <select
+                          value={modalStatusFilter}
+                          onChange={(e) => setModalStatusFilter(e.target.value)}
+                          className="w-full p-1 border rounded-lg bg-background text-xs focus:outline-none focus:border-indigo-500 h-8 font-semibold"
+                        >
+                          <option value="all">All Status</option>
+                          <option value="approved">Approved</option>
+                          <option value="pending">Pending</option>
+                          <option value="rejected">Rejected</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Action buttons */}
+                <div className="space-y-3 pt-4 border-t">
+                  {exportingBadges && (
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between text-xs font-semibold text-indigo-700">
+                        <span>Exporting PNG Badges...</span>
+                        <span>{Math.round(badgeExportProgress)}%</span>
+                      </div>
+                      <div className="h-2 bg-indigo-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-indigo-600 transition-all duration-150"
+                          style={{ width: `${badgeExportProgress}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      onClick={handleExportBadges}
+                      disabled={exportingBadges || filteredBadgeTargets.length === 0}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold flex items-center justify-center gap-1.5 shadow-sm"
+                    >
+                      {exportingBadges ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Download className="h-4 w-4" />
+                      )}
+                      {filteredBadgeTargets.length > 1 ? "Bulk Download" : "Download PNG"}
+                    </Button>
+
+                    <Button
+                      onClick={handlePrintBadges}
+                      disabled={exportingBadges || filteredBadgeTargets.length === 0}
+                      variant="outline"
+                      className="border-indigo-200 text-indigo-700 hover:bg-indigo-50 font-semibold flex items-center justify-center gap-1.5"
+                    >
+                      <Printer className="h-4 w-4" />
+                      Print Badges
+                    </Button>
+                  </div>
+
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="w-full text-muted-foreground hover:bg-accent text-xs"
+                    onClick={() => setBadgeModalOpen(false)}
+                    disabled={exportingBadges}
+                  >
+                    Close Operations
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Hidden Bulk Print Container (rendered only during browser printing) */}
+      <div className="hidden print:block fixed inset-0 z-[9999] bg-white print-section">
+        {filteredBadgeTargets.map((delegate) => (
+          <div
+            key={delegate._id}
+            className="page-break-after-always"
+          >
+            <PremiumBadge
+              delegate={delegate}
+              language={badgeLanguage}
+              categoryOverride={badgeCategoryOverride === "auto" ? undefined : badgeCategoryOverride}
+            />
+          </div>
+        ))}
+      </div>
+
+      <style dangerouslySetInnerHTML={{ __html: `
+        @media print {
+          /* Completely isolate printable badges, hiding dashboard wrapper entirely */
+          body > *:not(.print-section) {
+            display: none !important;
+          }
+          .print-section {
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: center !important;
+            justify-content: flex-start !important;
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+            background: white !important;
+          }
+          .page-break-after-always {
+            page-break-after: always !important;
+            break-after: always !important;
+            height: 100vh !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+        }
+      `}} />
+
     </Card>
   );
 }

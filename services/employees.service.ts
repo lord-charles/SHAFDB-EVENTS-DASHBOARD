@@ -2,8 +2,8 @@
 
 import axios, { AxiosError } from "axios";
 import { User } from "@/types/user";
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 
 export interface PaginatedResponse<T> {
   data: T[];
@@ -19,10 +19,10 @@ export async function handleUnauthorized() {
 
 const getAxiosConfig = async () => {
   const cookieStore = await cookies();
-  const token = cookieStore.get("token");
+  const token = cookieStore.get("token")?.value;
   return {
     headers: {
-      Authorization: token ? `Bearer ${token.value}` : "",
+      Authorization: token ? `Bearer ${token}` : "",
       "Content-Type": "application/json",
     },
   };
