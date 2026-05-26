@@ -70,10 +70,12 @@ export default function UserManagementPage() {
     firstName: "",
     lastName: "",
     email: "",
+    phoneNumber: "",
     nationalId: "",
     employeeId: "",
     department: "",
     position: "",
+    employmentType: "full-time",
     password: "",
     roles: ["employee"],
     status: "active",
@@ -108,10 +110,12 @@ export default function UserManagementPage() {
       firstName: "",
       lastName: "",
       email: "",
+      phoneNumber: "",
       nationalId: "",
       employeeId: `EMP-${Math.floor(1000 + Math.random() * 9000)}`,
       department: "operations",
       position: "Associate",
+      employmentType: "full-time",
       password: "",
       roles: ["employee"],
       status: "active",
@@ -125,10 +129,12 @@ export default function UserManagementPage() {
       firstName: user.firstName || "",
       lastName: user.lastName || "",
       email: user.email || "",
+      phoneNumber: user.phoneNumber || "",
       nationalId: user.nationalId || "",
       employeeId: user.employeeId || "",
       department: user.department || "operations",
       position: user.position || "Associate",
+      employmentType: user.employmentType || "full-time",
       password: "", // Never prefill passwords
       roles: user.roles || ["employee"],
       status: user.status || "active",
@@ -440,15 +446,28 @@ export default function UserManagementPage() {
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <label className="text-xs font-semibold uppercase text-muted-foreground">Email Address</label>
-                <Input
-                  required
-                  type="email"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  className="border bg-background"
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold uppercase text-muted-foreground">Email Address</label>
+                  <Input
+                    required
+                    type="email"
+                    value={formData.email}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    className="border bg-background"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold uppercase text-muted-foreground">Phone Number</label>
+                  <Input
+                    required
+                    type="tel"
+                    placeholder="254712345678"
+                    value={formData.phoneNumber}
+                    onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
+                    className="border bg-background"
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -491,6 +510,24 @@ export default function UserManagementPage() {
                     className="border bg-background"
                   />
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase text-muted-foreground">Employment Type</label>
+                <Select
+                  value={formData.employmentType}
+                  onValueChange={(val) => setFormData({ ...formData, employmentType: val })}
+                >
+                  <SelectTrigger className="border bg-background">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="full-time">Full-Time</SelectItem>
+                    <SelectItem value="part-time">Part-Time</SelectItem>
+                    <SelectItem value="contract">Contract</SelectItem>
+                    <SelectItem value="intern">Intern</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="space-y-2">

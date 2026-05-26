@@ -52,17 +52,17 @@ const data = {
       url: "/users",
       icon: UsersIcon,
     },
-    {
-      title: "Events",
-      url: "/events",
-      icon: CalendarIcon,
-    },
-    {
-      title: "Information",
+    // {
+    //   title: "Events",
+    //   url: "/events",
+    //   icon: CalendarIcon,
+    // },
+    // {
+    //   title: "Information",
 
-      url: "/information",
-      icon: InfoCircledIcon,
-    },
+    //   url: "/information",
+    //   icon: InfoCircledIcon,
+    // },
   ],
   navSecondary: [
     {
